@@ -260,3 +260,10 @@ def main():
 # Called directly (not behind an if __name__ check) so that it runs however
 # main.py chooses to launch this file.
 main()
+
+# Cost sweep and object-level evaluation, using the files main() just wrote.
+from costing import run_costing
+from evaluation import run_evaluation
+
+run_costing()
+run_evaluation()
