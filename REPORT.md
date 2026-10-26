@@ -178,10 +178,28 @@ I priced my design against three alternatives, per 1,000 images:
 Doing nothing is by far the worst. The model alone is bad because every false alert costs €1,000. Checking everything is the cheapest in euros, but it needs about 5 operators looking at 5,000 images a day. My design costs more per 1,000 images but needs only one operator's time. So under my assumptions the model's value is a smaller workload, not a lower cost. It may also be more reliable, because a person looking at 5,000 images a day will get tired and miss things, while my assumption that the operator is always right ignores that.
 
 ## Limitations & next steps
+These are the real limits I found, and what I would do about each one.
 
-*Real limitations you found, and concretely how you'd address each one with
-more time or data. Not generic hedging.*
+1. **The test images are not what a real camera sees.** The dataset is mostly web photos (close-ups of flames, forests, smoke clouds), and every test image has fire or smoke in it. I never tested the model on a normal scene like an empty room, a kitchen with steam or a bright lamp, so my false alarm numbers only come from 79 images with smoke and no fire. With more time I would collect frames from real building cameras, including lots of normal ones, and test on those.
+
+2. **I chose the thresholds on the same images I used to report the cost.** This makes my cost of about €23,858 per 1,000 images a bit too good. I would choose the thresholds on the validation images and report the cost only on the test images.
+
+3. **Smoke and small fires are the weak spots.** Smoke is found 64% of the time against 78% for fire, and fire smaller than 1% of the image is found only 66% of the time. A small, far-away fire is exactly what a camera is for. I would add more smoke examples, try the bigger yolo11s model and a larger image size, and split big images into tiles so small objects look bigger.
+
+4. **The costs are my own assumptions.** The €1,000,000 for a missed fire, the €1,000 for a false callout, the €10,000 delay, the 1-in-1,000 base rate and 30 seconds per check are guesses with reasons, not real data. The most important is the number of checks a team can do per day, which changes the cost from €182,635 to €12,737 per 1,000 images. I would ask a fire brigade and an insurer for real figures, and measure how long a check really takes.
+
+5. **I assume the operator is always right.** A real person checking 1,000 images a day will get tired and miss things, and a building needs someone watching 24 hours, so one operator is not enough. I would measure the operator's mistakes and add them to the cost calculation.
+
+6. **My cost calculation counts an image as caught if the model finds at least one fire box.** It does not check that the box is in the right place, so it is kinder than the object results. I would count an image as caught only if the box matches a real fire.
+
+7. **I did one training run.** I did not repeat it with different seeds, so I do not know how much the numbers move from run to run, and with only 216 smoke objects in the test set I expect small differences to be noise. I also did not run the pretrained COCO model on the test images: I know it scores 0 because it has no fire or smoke class, but I did not measure it. I would repeat the run with several seeds and report a range.
+
+8. **The dataset has some repeated labels and a few labels drawn as outlines instead of boxes.** I counted outlines as boxes, which is a small simplification.
 
 ## Generative AI use disclosure
 
-*Per the syllabus AI Policy: what you used and how, or "no AI content used."*
+I used Claude (an AI assistant made by Anthropic) for this assignment.
+
+What it did: it helped me find datasets on Roboflow Universe, wrote the code in train.py, explore_data.py, costing.py, evaluation.py and app.py (the dataset download, the training call, the threshold sweep, the plots and the dashboard), explained how to set up Colab, Git and VS Code, and looked up sources for the Madrid office prices and firefighter costs. It also suggested starting values for some of my cost assumptions (the €10,000 delay, 5,000 images a day, 30 seconds per check and 1,000 checks a day) and wrote a first draft of the text in REPORT.md.
+
+[I went through each assumption and kept or changed it myself. I rewrote the analysis, explanations and conclusions in REPORT.md in my own words, and the decisions in it are mine: the problem, which class is positive, the cost figures, where the thresholds go, how much goes to a person, and whether the model is good enough to ship.]
