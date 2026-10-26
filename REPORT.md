@@ -54,7 +54,7 @@ Roboflow made 3 altered copies (flipped, rotated, brighter or darker) of every t
 
 What this means:
 - There is about 2.5 times more fire than smoke, so the model has fewer examples of smoke to learn from and will probably be weaker on it. The test set has only 216 smoke objects, so the smoke results will be noisy and I should not trust small differences.
-- Fire is small in the photo (about 3% of the image in the test set) and smoke is big (about 16%). Small objects are harder to find, so I expect more missed fires than missed smoke.
+- Fire is small in the photo (about 3% of the image in the test set) and smoke is big (about 16%). I expected more missed fires than missed smoke, because small objects are harder to find. The results showed the opposite: smoke is the weaker class (see the per-class section).
 - Almost every image has fire or smoke in it. All 435 test images do, and only 4 of the 9,156 training images are empty. So this dataset cannot tell me how often the model raises a false alarm on a normal scene, such as an empty room. I will have to assume how often real fires happen in the cost section, and the false alarm numbers will only come from images that have smoke but no fire.
 - The photos look like web photos, not security camera footage, so I cannot conclude how well the model would work on a real camera feed in a building.
 
@@ -76,12 +76,47 @@ The two baselines score 0 because they cannot find fire or smoke at all. The COC
 
 ## Per-class evaluation and failure modes
 
-*Per-class AP50, or per-class precision/recall and the confusion matrix.
-Which class carries the headline number, which one is dragging, and what the
-model actually confuses with what. Show where it breaks, not just that it
-works.*
+Fire is the positive class, as in the cost section. All numbers are on the 435 test images.
 
-## Cost matrix and operating point
+| Class | Real objects | Precision | Recall | AP50 | mAP50-95 |
+|---|---|---|---|---|---|
+| Fire | 534 | 0.775 | 0.780 | 0.821 | 0.486 |
+| Smoke | 216 | 0.749 | 0.636 | 0.682 | 0.396 |
+| All | 750 | 0.762 | 0.708 | 0.752 | 0.441 |
+
+Fire carries the headline number. Smoke drags it down, and its recall of 64% is the weakest figure in the table: the model misses about a third of the smoke.
+
+Confusion matrix, using confidence of at least 0.21 (my lower threshold). An object counts as found if the model's box overlaps the real box by at least 50%. Rows are what was really there, columns are what the model said. "Nothing" in the last column means a real object the model missed, and "Nothing" in the last row means a box where there was nothing.
+
+| Really there / Model said | Fire | Smoke | Nothing (missed) |
+|---|---|---|---|
+| Fire | 417 | 4 | 113 |
+| Smoke | 12 | 144 | 60 |
+| Nothing | 113 | 49 | – |
+
+![Confusion matrix](outputs/confusion_matrix.png)
+
+At this confidence the precision and recall are slightly different from the table above (fire 0.77 and 0.78, smoke 0.73 and 0.67), because the table above uses the confidence level that gives the best balance.
+
+What the matrix shows:
+- The model almost never mixes the two classes up. Only 4 fires were called smoke and only 12 smokes were called fire.
+- Its mistakes are mostly misses (113 fires and 60 smokes) and boxes where nothing matches (113 as fire, 49 as smoke).
+- These two numbers are not fully separate. If the model finds a fire but draws the box in the wrong place (overlap under 50%), it counts once as a miss and once as a false alarm. So some of the 113 and 113 are the same fires, and the real number of fires the model completely missed is lower.
+
+Where it breaks: the size of the object in the image.
+
+| Size of the object | Fire found | Smoke found |
+|---|---|---|
+| Under 1% of the image | 115 of 174 (66%) | 0 of 3 |
+| 1% to 5% | 105 of 139 (76%) | 2 of 16 (12%) |
+| 5% to 20% | 122 of 141 (87%) | 67 of 109 (61%) |
+| Over 20% | 75 of 80 (94%) | 75 of 88 (85%) |
+
+Both classes get worse as the object gets smaller. Fire goes from 94% found when it is large to 66% when it is tiny. Smoke goes from 85% to 12%, but there are only 19 smoke objects under 5% of the image, so those two numbers are very uncertain and I would not trust them.
+
+Smoke is weaker than fire even at medium sizes (61% against 87% at 5% to 20%), so size is not the only reason. My guess is that smoke has fuzzy edges, so it is harder to draw a box that matches the real one, and the training set has fewer smoke examples (4,312 smoke objects against 11,505 fire objects, including the altered copies). I did not test this.
+
+What this means for my problem: my costs only treat Fire as positive, so the weak smoke results do not change my cost numbers. But a small, distant fire is exactly what a camera is for, and that is where the model is weakest (66% found). Also, my cost calculation counts an image as caught if the model finds at least one fire box, which is easier than finding every fire, so it is kinder than this table.
 
 ## Cost matrix and operating point
 
