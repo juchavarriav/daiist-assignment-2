@@ -60,10 +60,19 @@ What this means:
 
 ## Finetuning and baselines
 
-*Which model and task (detection or classification) and why. A results table on
-the same test split: your finetuned model, the pretrained COCO model zero-shot,
-and a trivial baseline. What changed, and whether the gap is as large as you
-expected.*
+I used the object detection task, because the model has to find where the fire or smoke is in the photo, not only say that it is there. I used yolo11n, the smallest YOLO11 model, because it is fast and my dataset is not very large. I started from the pretrained COCO model (already trained on everyday objects) and finetuned it on my fire and smoke photos.
+
+Training settings: Google Colab with a T4 GPU, up to 20 epochs, image size 640, batch size 16, seed 0, using all 9,156 training images. The best version on the validation images is saved in weights/best.pt.
+
+All results are on the same 435 test images.
+
+| Model | AP50 | mAP50-95 |
+|---|---|---|
+| My finetuned yolo11n | 0.752 | 0.441 |
+| Pretrained COCO model, no finetuning | 0.000 | 0.000 |
+| Predict nothing | 0.000 | 0.000 |
+
+The two baselines score 0 because they cannot find fire or smoke at all. The COCO model only knows 80 everyday objects (it has "fire hydrant" but no fire or smoke), so it cannot name either class. The predict-nothing baseline never raises an alarm, so it finds nothing. I did not run the COCO model on the test images. I know it scores 0 because it has no matching class. The gap is huge because both baselines are very weak, so beating them does not show that the model is good enough to use. That question is answered in the cost section.
 
 ## Per-class evaluation and failure modes
 
@@ -74,18 +83,64 @@ works.*
 
 ## Cost matrix and operating point
 
-*Your euro cost for each kind of error and where each figure came from. The
-base rate you assumed. The cost-against-threshold sweep, and the operating
-point you chose. State the assumption that would most change your answer if it
-were wrong.*
+## Cost matrix and operating point
+
+I treat Fire as the positive class. One case is one image. An image counts as a real fire if the test labels have at least one Fire box in it, and the model's score for an image is the highest confidence of any Fire box it found (0 if it found none). My 356 test images with fire are the positives and my 79 test images with only smoke are the negatives. This is a simple way to count: it does not check that the box is in the right place, and finding one flame in an image is easier than finding every flame, which is why 98.6% of fire images get at least one alert here while the per-object recall is only 78%.
+
+| Case | Cost |
+|---|---|
+| Real fire, passed (missed) | €1,000,000 |
+| Real fire, sent to a person | €0.20 for the check + €10,000 extra damage from the delay |
+| Real fire, firemen called directly | €0 |
+| No fire, passed | €0 |
+| No fire, sent to a person | €0.20 |
+| No fire, firemen called directly (false callout) | €1,000 |
+
+The €1,000,000, €1,000 and €0.20 come from my business section. The €10,000 delay is my own assumption: a fire that waits for a person to look at it grows a bit more than one that gets an immediate call.
+
+I also assume 5,000 images arrive per day (for example about 50 cameras sending one image every 15 minutes), and that a person needs 30 seconds to check one image. So one operator can do about 1,000 checks in a working day, and I use that as the limit of what the team can do.
+
+Base rate: I assume 1 in 1,000 images shows a real fire. I picked this myself, and it is high. With 5,000 images a day it means about 5 fire images a day, which is more than a real building would have. I checked what happens with other values. From 1 in 100,000 to 1 in 1,000 the chosen thresholds do not change at all, only the cost gets smaller (about €276 per 1,000 images at 1 in 100,000). Only if fires were as common as 1 in 100 would the best plan change, with the thresholds moving to 0.18 and 0.55 so that more images go straight to the firemen.
+
+How I chose the thresholds: I tried every pair of thresholds from 0.00 to 1.00 in steps of 0.01 (the lower one never above the upper one), calculated the expected cost per 1,000 images for each pair, and took the cheapest pair that one operator can handle (at most 1,000 checks a day). The best pair is lower 0.21 and upper 0.87, with an expected cost of about €23,858 per 1,000 images.
+
+![Cost against threshold](outputs/cost_curve.png)
+
+The solid orange line is the part that one operator can handle (at most 1,000 checks a day). The dashed part, to the left of about 0.18, needs more checks than that. The cheapest point on the whole orange line is at 0.00 (the hollow circle), where everything goes to a person. My choice, the red dot at 0.21, is the cheapest point I can actually staff. The blue triangle is the cheapest the model can do on its own, at a threshold of about 0.41.
+
+At these thresholds, the 356 test images with fire split into 5 passed (1.4%), 348 sent to a person (97.8%) and 3 called directly (0.8%). The 79 images without fire split into 64 passed (81%), 15 sent to a person (19%) and 0 called directly. Almost all the cost comes from fires: about €14,000 from the missed ones, about €9,800 from the delay on the ones sent to a person, and only about €40 from everything else. Only 5 missed fires is a small number, so the miss rate of 1.4% is not precise.
+
+The assumption that would most change my answer is how many images a person can check per day. The lower threshold of 0.21 exists only because I allowed 1,000 checks a day. Here is what happens if the team can do more or fewer checks (everything else the same):
+
+| Checks per day | Lower threshold | Upper threshold | Cost per 1,000 images | Share sent to a person |
+|---|---|---|---|---|
+| 0 | 0.41 | 0.41 | €182,635 | 0% |
+| 250 | 0.41 | 0.55 | €145,942 | 3.8% |
+| 1,000 (my assumption) | 0.21 | 0.87 | €23,858 | 19.1% |
+| 2,500 | 0.18 | 0.87 | €12,737 | 20.3% |
+
+With no checks the model decides alone and the cost is 7 times higher. Going from 250 to 1,000 checks a day cuts the cost by more than 80%, so the people matter as much as the model. If people could check everything, the cheapest plan would send all images to a person (lower threshold 0.00), costing €10,116 per 1,000 images and needing 5.2 operators.
+
+The cost of a missed fire matters less. If it were only €50,000 the thresholds would stay the same (0.21 and 0.87), and if it were €4,000,000 they would only move a little (0.18 and 0.84).
+
+Caution: I chose the thresholds on the same 435 test images I used to report the cost, so the cost is probably a bit better than I would get on new images. The no-fire group has only 79 images, so the false alarm rate is based on little data, and these images contain smoke, which is probably harder than an empty room.
 
 ## What a person still has to check
 
-*Your two thresholds, and what share of cases they send to a person. How many
-that is per day, how long one takes to check, and how many people that needs.
-Is that realistic? Then your design priced against the three alternatives:
-doing nothing, having a person check everything, and letting the model decide
-on its own.*
+My two thresholds are 0.21 and 0.87. Below 0.21 the image is passed, between 0.21 and 0.87 it goes to the operator, and from 0.87 up the firemen are called directly.
+
+19.1% of cases go to a person. With 5,000 images a day that is about 953 images a day. At 30 seconds each that is 7.9 hours of checking a day, which is one operator working a full day. This fits, but with no spare time. Also, a building needs someone watching 24 hours a day, so in practice I would need at least 3 people working in shifts, and they would be idle most of the time.
+
+I priced my design against three alternatives, per 1,000 images:
+
+| Plan | Cost per 1,000 images | People needed |
+|---|---|---|
+| Do nothing | €1,000,000 | 0 |
+| A person checks everything | €10,200 | about 5 operators (41.7 hours a day) |
+| The model decides alone (one threshold, 0.41) | €182,635 | 0, but every alert calls the firemen |
+| The model plus a person (my design) | €23,858 | 1 operator (7.9 hours a day) |
+
+Doing nothing is by far the worst. The model alone is bad because every false alert costs €1,000. Checking everything is the cheapest in euros, but it needs about 5 operators looking at 5,000 images a day. My design costs more per 1,000 images but needs only one operator's time. So under my assumptions the model's value is a smaller workload, not a lower cost. It may also be more reliable, because a person looking at 5,000 images a day will get tired and miss things, while my assumption that the operator is always right ignores that.
 
 ## Limitations & next steps
 
